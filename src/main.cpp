@@ -9,6 +9,9 @@
 
 using namespace cv;
 
+String gWindow2dName = "2d visualizer";
+String gWindow3dName = "3d visualizer";
+
 /* 2d visualization */
 float gScale2d = 1;
 
@@ -51,8 +54,9 @@ void Update2d()
 	sprintf(text, "ROI RECT X = %d, Y = %d", gRoiRect2d.x, gRoiRect2d.y);
 	putText(gResultImg, text, cv::Point(50, 50), cv::FONT_HERSHEY_COMPLEX, 0.5, Scalar(0, 255, 255));
 
-	imshow("2d visualizer", gResultImg);
+	imshow(gWindow2dName, gResultImg);
 }
+
 void OnMouse2d(int event, int x, int y, int flags, void* userdata)
 {
 	if (x < 0 || x > WIDTH - 1 || y < 0 || y > HEIGHT - 1)
@@ -100,14 +104,97 @@ void OnMouse2d(int event, int x, int y, int flags, void* userdata)
 	Update2d();
 }
 
-int main()
-{
-	namedWindow("2d visualizer", CV_WINDOW_AUTOSIZE);
-	setMouseCallback("2d visualizer", OnMouse2d);
+/* 3d visualization */
+float thetaX = 0.0;
+float thetaY = 0.0;
+float scaleFactor = 1.0;
 
-	while (true) {
-		waitKey(2);
+float dx = 0.0;
+float dy = 0.0;
+float dxOld = 0.0;
+float dyOld = 0.0;
+
+void OnMouse3d(int event, int x, int y, int flags, void* param)
+{
+	if (event == CV_EVENT_RBUTTONDOWN) {
+		thetaX = 0;
+		thetaY = 0;
+		scaleFactor = 1;
 	}
 
+	if (event == CV_EVENT_LBUTTONDOWN) {
+		dxOld = x;
+		dyOld = y;
+	}
+
+	if (event == CV_EVENT_MOUSEMOVE && (flags & CV_EVENT_LBUTTONDOWN))   //左键按下，鼠标移动时
+	{
+		dx += x - dxOld;
+		dy += y - dyOld;
+		thetaX = dy / 200 * 90;
+		thetaY = dx / 200 * 90;
+	}
+
+	if (event == CV_EVENT_MOUSEWHEEL) {
+		int value = getMouseWheelDelta(flags);
+		float scaleStep = SCALE_STEP;
+		if (value > 0)
+			scaleStep = +SCALE_STEP;
+		else if (value < 0)
+			scaleStep = -SCALE_STEP;
+		scaleFactor *= (1 + scaleStep);
+	}
+
+	updateWindow(gWindow3dName);
+}
+
+void OnOpengl(void* param)
+{
+	glLoadIdentity();
+	glRotatef(thetaX, 1, 0, 0);
+	glRotatef(thetaY, 0, 1, 0);
+	glScalef(scaleFactor, scaleFactor, scaleFactor);
+	//glTranslatef(-ptsCen.x, -ptsCen.y, -ptsCen.z);
+
+	glPointSize(5.0);
+	glColor3f(0, 1, 0);
+	glBegin(GL_POINTS);
+	glVertex3d(0, 0, 0);
+	glEnd();
+
+	glPointSize(5.0);
+	glColor3f(0, 1, 0);
+	glBegin(GL_POINTS);
+	glVertex3d(0.1, 0, 0);
+	glEnd();
+	glFlush();
+}
+
+int main()
+{
+	namedWindow(gWindow2dName, WINDOW_AUTOSIZE);
+	setMouseCallback(gWindow2dName, OnMouse2d);
+
+	namedWindow(gWindow3dName, WINDOW_OPENGL);
+	resizeWindow(gWindow3dName, 640, 480);
+	setOpenGlContext(gWindow3dName);
+	setMouseCallback(gWindow3dName, OnMouse3d);
+	setOpenGlDrawCallback(gWindow3dName, OnOpengl);
+
+	bool runFlag = true;
+	while (runFlag) {
+		int key = waitKey(2);
+		switch (key) {
+		case 'q':
+		{
+			runFlag = false;
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	destroyAllWindows();
 	return 0;
 }
