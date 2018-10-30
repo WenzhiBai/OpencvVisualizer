@@ -1,11 +1,13 @@
 ﻿#include "opencv2/opencv.hpp"
 #include <Windows.h>
 #include <gl/GL.h>
+#include <vector>
 
-#define PI			3.1415926535
-#define WIDTH		800
-#define HEIGHT		800
-#define SCALE_STEP	0.1f
+#define PI						3.1415926535
+#define WIDTH					800
+#define HEIGHT					800
+#define SCALE_STEP				0.1f
+#define MAX_LINE_BUFFER_SIZE	128
 
 using namespace cv;
 
@@ -114,6 +116,17 @@ float dy = 0.0;
 float dxOld = 0.0;
 float dyOld = 0.0;
 
+struct PointsCloud {
+	std::vector<Point3f> points;
+	std::vector<float> intensity;
+
+	void Reset()
+	{
+		points.clear();
+		intensity.clear();
+	}
+} gPointsCloud;
+
 void OnMouse3d(int event, int x, int y, int flags, void* param)
 {
 	if (event == CV_EVENT_RBUTTONDOWN) {
@@ -170,16 +183,40 @@ void OnOpengl(void* param)
 	glFlush();
 }
 
+bool LoadData()
+{
+	FILE *file = fopen("../data/xyzi.txt", "r");
+	if (file == NULL) {
+		return false;
+	}
+
+	char line_buffer[MAX_LINE_BUFFER_SIZE];
+	float x = 0, y = 0, z = 0, i = 0;
+	gPointsCloud.Reset();
+
+	while (fgets(line_buffer, MAX_LINE_BUFFER_SIZE, file)) {
+		if (sscanf(line_buffer, "%f %f %f %f", &x, &y, &z, &i) == 4) {
+			gPointsCloud.points.push_back(Point3f(x, y, z));
+			gPointsCloud.intensity.push_back(i);
+		}
+	}
+
+	fclose(file);
+	return true;
+}
+
 int main()
 {
 	namedWindow(gWindow2dName, WINDOW_AUTOSIZE);
 	setMouseCallback(gWindow2dName, OnMouse2d);
 
-	namedWindow(gWindow3dName, WINDOW_OPENGL);
-	resizeWindow(gWindow3dName, 640, 480);
-	setOpenGlContext(gWindow3dName);
-	setMouseCallback(gWindow3dName, OnMouse3d);
-	setOpenGlDrawCallback(gWindow3dName, OnOpengl);
+	if (LoadData()) {
+		namedWindow(gWindow3dName, WINDOW_OPENGL);
+		resizeWindow(gWindow3dName, 640, 480);
+		setOpenGlContext(gWindow3dName);
+		setMouseCallback(gWindow3dName, OnMouse3d);
+		setOpenGlDrawCallback(gWindow3dName, OnOpengl);
+	}
 
 	bool runFlag = true;
 	while (runFlag) {
