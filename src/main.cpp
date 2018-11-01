@@ -6,7 +6,8 @@
 #define PI						3.1415926535
 #define WIDTH					800
 #define HEIGHT					800
-#define SCALE_STEP				0.1f
+#define SCALE_STEP_2D			0.1
+#define SCALE_STEP_3D			20
 #define MAX_LINE_BUFFER_SIZE	128
 
 using namespace cv;
@@ -95,9 +96,9 @@ void OnMouse2d(int event, int x, int y, int flags, void* userdata)
 		int value = getMouseWheelDelta(flags);
 		float scaleStep = 0;
 		if (value > 0)
-			scaleStep = SCALE_STEP;
+			scaleStep = SCALE_STEP_2D;
 		else if (value < 0)
-			scaleStep = -SCALE_STEP;
+			scaleStep = -SCALE_STEP_2D;
 		gScale2d *= (1 + scaleStep);
 		gRoiRect2d.x = x + (gRoiRect2d.x - x)*(1 + scaleStep);
 		gRoiRect2d.y = y + (gRoiRect2d.y - y)*(1 + scaleStep);
@@ -107,14 +108,14 @@ void OnMouse2d(int event, int x, int y, int flags, void* userdata)
 }
 
 /* 3d visualization */
-float gThetaX = 0.0;
-float gThetaY = 0.0;
-float gScaleFactor = 1.0;
+float gViewYaw = 0.0;
+float gViewPitch = 0.0;
+float gViewTransX = 0.0;
+float gViewTransY = 0.0;
+float gViewDistance = 1000.0;
 
-float dx = 0.0;
-float dy = 0.0;
-float dxOld = 0.0;
-float dyOld = 0.0;
+float gLastX = 0.0;
+float gLastY = 0.0;
 
 struct PointsCloud {
 	std::vector<Point3f> points;
@@ -139,56 +140,95 @@ struct PointsCloud {
 void OnMouse3d(int event, int x, int y, int flags, void* param)
 {
 	if (event == CV_EVENT_RBUTTONDOWN) {
-		gThetaX = 0;
-		gThetaY = 0;
-		gScaleFactor = 1;
+		gLastX = x;
+		gLastY = y;
+	}
+
+	if (event == CV_EVENT_MOUSEMOVE && (flags & CV_EVENT_RBUTTONDOWN))   //右键按下，鼠标移动时
+	{
+		gViewTransX += (x - gLastX) * 1.0;
+		gViewTransY += (y - gLastY)	* 1.0;
+		gLastX = x;
+		gLastY = y;
 	}
 
 	if (event == CV_EVENT_LBUTTONDOWN) {
-		dxOld = x;
-		dyOld = y;
+		gLastX = x;
+		gLastY = y;
 	}
 
 	if (event == CV_EVENT_MOUSEMOVE && (flags & CV_EVENT_LBUTTONDOWN))   //左键按下，鼠标移动时
 	{
-		dx += x - dxOld;
-		dy += y - dyOld;
-		gThetaX = dy / 30;
-		gThetaY = dx / 30;
+		gViewYaw -= (x - gLastX) * 1.0;
+		if (gViewYaw < 0.0) {
+			gViewYaw += 360.0;
+		} else if (gViewYaw > 360.0) {
+			gViewYaw -= 360.0;
+		}
+
+		gViewPitch -= (y - gLastY) * 1.0;
+		if (gViewPitch < 0.0) {
+			gViewPitch += 360.0;
+		} else if (gViewPitch > 360.0) {
+			gViewPitch -= 360.0;
+		}
+
+		gLastX = x;
+		gLastY = y;
 	}
 
 	if (event == CV_EVENT_MOUSEWHEEL) {
 		int value = getMouseWheelDelta(flags);
-		float scaleStep = SCALE_STEP;
-		if (value > 0)
-			scaleStep = +SCALE_STEP;
-		else if (value < 0)
-			scaleStep = -SCALE_STEP;
-		gScaleFactor *= (1 + scaleStep);
+		if (value > 0) {
+			gViewDistance += SCALE_STEP_3D;
+		} else if (value < 0) {
+			gViewDistance -= SCALE_STEP_3D;
+		}
+
+		if (gViewDistance < 1.0) {
+			gViewDistance = 1.0;
+		} else if (gViewDistance > 2000) {
+			gViewDistance = 2000;
+		}
 	}
 
 	updateWindow(gWindow3dName);
 }
 
+void gluPerspective(GLdouble fovy, GLdouble aspect, GLdouble zNear, GLdouble zFar)
+{
+	GLdouble xmin, xmax, ymin, ymax;
+
+	ymax = zNear * tan(fovy * PI / 360.0);
+	ymin = -ymax;
+	xmin = ymin * aspect;
+	xmax = ymax * aspect;
+
+	glFrustum(xmin, xmax, ymin, ymax, zNear, zFar);
+}
+
 void OnOpengl(void* param)
 {
-	//glViewport(0, 0, (GLsizei)gPointsCloud.width, (GLsizei)gPointsCloud.height);
-	//glMatrixMode(GL_PROJECTION);
-
+	glViewport(0, 0, WIDTH, HEIGHT);
+	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	glScalef(gScaleFactor, gScaleFactor, gScaleFactor);
-	glTranslatef(-gPointsCloud.centerPoint.x, -gPointsCloud.centerPoint.y, -gPointsCloud.centerPoint.z);
-	glRotatef(gThetaX, 1, 0, 0);
-	glRotatef(gThetaY, 0, 0, 1);
+	gluPerspective(45, (double)WIDTH / HEIGHT, 1, 5000);
 
-	glBegin(GL_POINTS);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glTranslatef(-gPointsCloud.centerPoint.x, -gPointsCloud.centerPoint.y, -gPointsCloud.centerPoint.z);
+	glTranslatef(gViewTransX, -gViewTransY, -gViewDistance);
+	glRotatef(-gViewPitch, 1, 0, 0);
+	glRotatef(-gViewYaw, 0, 1, 0);
+
 	for (size_t i = 0; i < gPointsCloud.points.size(); i++) {
 		glPointSize(gPointsCloud.intensity[i]/100);
+		glBegin(GL_POINTS);
 		glColor3f(0, 1, 0);
 		glVertex3f(gPointsCloud.points[i].x, gPointsCloud.points[i].y, gPointsCloud.points[i].z);
-		
+		glEnd();
 	}
-	glEnd();
+	
 	glFlush();
 }
 
@@ -244,7 +284,7 @@ int main()
 
 	if (LoadData()) {
 		namedWindow(gWindow3dName, WINDOW_OPENGL);
-		resizeWindow(gWindow3dName, 640, 480);
+		resizeWindow(gWindow3dName, WIDTH, HEIGHT);
 		setOpenGlContext(gWindow3dName);
 		setMouseCallback(gWindow3dName, OnMouse3d);
 		setOpenGlDrawCallback(gWindow3dName, OnOpengl);
