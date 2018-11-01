@@ -107,9 +107,9 @@ void OnMouse2d(int event, int x, int y, int flags, void* userdata)
 }
 
 /* 3d visualization */
-float thetaX = 0.0;
-float thetaY = 0.0;
-float scaleFactor = 1.0;
+float gThetaX = 0.0;
+float gThetaY = 0.0;
+float gScaleFactor = 1.0;
 
 float dx = 0.0;
 float dy = 0.0;
@@ -120,19 +120,28 @@ struct PointsCloud {
 	std::vector<Point3f> points;
 	std::vector<float> intensity;
 
+	Point3f lowerBoundary;
+	Point3f upperBoundary;
+	Point3f centerPoint;
+	float width, height, depth;
+
 	void Reset()
 	{
 		points.clear();
 		intensity.clear();
+		lowerBoundary = Point3f();
+		upperBoundary = Point3f();
+		centerPoint = Point3f();
+		width = height = depth = 0;
 	}
 } gPointsCloud;
 
 void OnMouse3d(int event, int x, int y, int flags, void* param)
 {
 	if (event == CV_EVENT_RBUTTONDOWN) {
-		thetaX = 0;
-		thetaY = 0;
-		scaleFactor = 1;
+		gThetaX = 0;
+		gThetaY = 0;
+		gScaleFactor = 1;
 	}
 
 	if (event == CV_EVENT_LBUTTONDOWN) {
@@ -144,8 +153,8 @@ void OnMouse3d(int event, int x, int y, int flags, void* param)
 	{
 		dx += x - dxOld;
 		dy += y - dyOld;
-		thetaX = dy / 200 * 90;
-		thetaY = dx / 200 * 90;
+		gThetaX = dy / 30;
+		gThetaY = dx / 30;
 	}
 
 	if (event == CV_EVENT_MOUSEWHEEL) {
@@ -155,7 +164,7 @@ void OnMouse3d(int event, int x, int y, int flags, void* param)
 			scaleStep = +SCALE_STEP;
 		else if (value < 0)
 			scaleStep = -SCALE_STEP;
-		scaleFactor *= (1 + scaleStep);
+		gScaleFactor *= (1 + scaleStep);
 	}
 
 	updateWindow(gWindow3dName);
@@ -163,22 +172,22 @@ void OnMouse3d(int event, int x, int y, int flags, void* param)
 
 void OnOpengl(void* param)
 {
+	//glViewport(0, 0, (GLsizei)gPointsCloud.width, (GLsizei)gPointsCloud.height);
+	//glMatrixMode(GL_PROJECTION);
+
 	glLoadIdentity();
-	glRotatef(thetaX, 1, 0, 0);
-	glRotatef(thetaY, 0, 1, 0);
-	glScalef(scaleFactor, scaleFactor, scaleFactor);
-	//glTranslatef(-ptsCen.x, -ptsCen.y, -ptsCen.z);
+	glScalef(gScaleFactor, gScaleFactor, gScaleFactor);
+	glTranslatef(-gPointsCloud.centerPoint.x, -gPointsCloud.centerPoint.y, -gPointsCloud.centerPoint.z);
+	glRotatef(gThetaX, 1, 0, 0);
+	glRotatef(gThetaY, 0, 0, 1);
 
-	glPointSize(5.0);
-	glColor3f(0, 1, 0);
 	glBegin(GL_POINTS);
-	glVertex3d(0, 0, 0);
-	glEnd();
-
-	glPointSize(5.0);
-	glColor3f(0, 1, 0);
-	glBegin(GL_POINTS);
-	glVertex3d(0.1, 0, 0);
+	for (size_t i = 0; i < gPointsCloud.points.size(); i++) {
+		glPointSize(gPointsCloud.intensity[i]/100);
+		glColor3f(0, 1, 0);
+		glVertex3f(gPointsCloud.points[i].x, gPointsCloud.points[i].y, gPointsCloud.points[i].z);
+		
+	}
 	glEnd();
 	glFlush();
 }
@@ -194,14 +203,37 @@ bool LoadData()
 	float x = 0, y = 0, z = 0, i = 0;
 	gPointsCloud.Reset();
 
+	bool isFirstIn = true;
 	while (fgets(line_buffer, MAX_LINE_BUFFER_SIZE, file)) {
 		if (sscanf(line_buffer, "%f %f %f %f", &x, &y, &z, &i) == 4) {
 			gPointsCloud.points.push_back(Point3f(x, y, z));
 			gPointsCloud.intensity.push_back(i);
+
+			if (isFirstIn) {
+				gPointsCloud.lowerBoundary.x = gPointsCloud.upperBoundary.x = x;
+				gPointsCloud.lowerBoundary.y = gPointsCloud.upperBoundary.y = y;
+				gPointsCloud.lowerBoundary.z = gPointsCloud.upperBoundary.z = z;
+				isFirstIn = false;
+			}
+			gPointsCloud.lowerBoundary.x = MIN(gPointsCloud.lowerBoundary.x, x);
+			gPointsCloud.lowerBoundary.y = MIN(gPointsCloud.lowerBoundary.y, y);
+			gPointsCloud.lowerBoundary.z = MIN(gPointsCloud.lowerBoundary.z, z);
+
+			gPointsCloud.upperBoundary.x = MAX(gPointsCloud.upperBoundary.x, x);
+			gPointsCloud.upperBoundary.y = MAX(gPointsCloud.upperBoundary.y, y);
+			gPointsCloud.upperBoundary.z = MAX(gPointsCloud.upperBoundary.z, z);
 		}
 	}
-
 	fclose(file);
+
+	gPointsCloud.width = gPointsCloud.upperBoundary.x - gPointsCloud.lowerBoundary.x;
+	gPointsCloud.height = gPointsCloud.upperBoundary.y - gPointsCloud.lowerBoundary.y;
+	gPointsCloud.depth = gPointsCloud.upperBoundary.z - gPointsCloud.lowerBoundary.z;
+
+	gPointsCloud.centerPoint.x = (gPointsCloud.upperBoundary.x + gPointsCloud.lowerBoundary.x)/2;
+	gPointsCloud.centerPoint.y = (gPointsCloud.upperBoundary.y + gPointsCloud.lowerBoundary.y)/2;
+	gPointsCloud.centerPoint.z = (gPointsCloud.upperBoundary.z + gPointsCloud.lowerBoundary.z)/2;
+
 	return true;
 }
 
